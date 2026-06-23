@@ -1,0 +1,28 @@
+{
+  "name": "device-management",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend",
+    "e2e-tests"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev": "npm run dev:backend & npm run dev:frontend",
+    "test:unit:backend": "npm run test --workspace=backend",
+    "test:unit:frontend": "npm run test --workspace=frontend",
+    "test:unit": "npm run test:unit:backend && npm run test:unit:frontend",
+    "test:e2e": "npm run test --workspace=e2e-tests",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "overrides": {
+    "js-yaml": "^4.1.2",
+    "postcss": "^8.5.15"
+  }
+}
