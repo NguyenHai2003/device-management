@@ -10,9 +10,7 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
 
 # Install all dependencies (dev included — needed for next build)
-RUN npm ci --workspace=frontend && \
-    npm install @tailwindcss/oxide-linux-x64-musl --save-optional --workspace=frontend && \
-    mkdir -p /app/frontend/node_modules
+RUN npm ci --workspace=frontend && mkdir -p /app/frontend/node_modules
 
 # ─── Stage 2: Build Next.js ────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
@@ -32,7 +30,7 @@ ARG NEXT_PUBLIC_METRICS_SSE_URL
 ENV NEXT_PUBLIC_METRICS_SSE_URL=$NEXT_PUBLIC_METRICS_SSE_URL
 
 # Build — output: standalone generates .next/standalone
-RUN cd frontend && npx next build
+RUN cd frontend && npx next build && mkdir -p /app/frontend/public
 
 # ─── Stage 3: Minimal runtime image ───────────────────────────────────────────
 FROM node:20-alpine AS runner
