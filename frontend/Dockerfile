@@ -24,6 +24,10 @@ COPY --from=deps /app/frontend/node_modules ./frontend/node_modules 2>/dev/null 
 # Copy frontend source
 COPY frontend ./frontend
 
+# Pass ARG and set ENV for Next.js build time
+ARG NEXT_PUBLIC_METRICS_SSE_URL
+ENV NEXT_PUBLIC_METRICS_SSE_URL=$NEXT_PUBLIC_METRICS_SSE_URL
+
 # Build — output: standalone generates .next/standalone
 RUN cd frontend && npx next build
 
