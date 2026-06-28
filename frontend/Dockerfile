@@ -17,7 +17,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy installed deps from deps stage
+# Copy installed deps and root manifest from deps stage
+COPY --from=deps /app/package.json /app/package-lock.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/frontend/node_modules ./frontend/node_modules
 
