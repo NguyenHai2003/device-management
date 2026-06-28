@@ -10,7 +10,7 @@ COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
 
 # Install only production deps for the backend workspace
-RUN npm ci --workspace=backend --omit=dev
+RUN npm ci --workspace=backend --omit=dev && mkdir -p /app/backend/node_modules
 
 # ─── Stage 2: Runtime image ────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -22,7 +22,7 @@ WORKDIR /app
 
 # Copy installed node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/backend/node_modules ./backend/node_modules 2>/dev/null || true
+COPY --from=deps /app/backend/node_modules ./backend/node_modules
 
 # Copy backend source
 COPY backend/src ./backend/src
