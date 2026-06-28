@@ -10,7 +10,7 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
 
 # Install all dependencies (dev included — needed for next build)
-RUN npm ci --workspace=frontend
+RUN npm ci --workspace=frontend && mkdir -p /app/frontend/node_modules
 
 # ─── Stage 2: Build Next.js ────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
@@ -19,7 +19,7 @@ WORKDIR /app
 
 # Copy installed deps from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/frontend/node_modules ./frontend/node_modules 2>/dev/null || true
+COPY --from=deps /app/frontend/node_modules ./frontend/node_modules
 
 # Copy frontend source
 COPY frontend ./frontend
