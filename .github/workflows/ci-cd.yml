@@ -1,43 +1,75 @@
 name: CI/CD Pipeline
 
+# Trigger:
+# - push for main/master: run pipeline (test → build → deploy)
+# - pull_request for main/master: run job test
 on:
   push:
     branches: [main, master]
+  pull_request:
+    branches: [main, master]
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Unit Test + E2E Playwright
+  # ─────────────────────────────────────────────────────────────────────────────
   test:
-    name: Run E2E Tests
+    name: 🧪 Run Tests (Unit + E2E)
     timeout-minutes: 60
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: "npm"
-      - name: Install dependencies
+
+      - name: Install monorepo dependencies
         run: npm install
-      - name: Force install Tailwind CSS Linux binary
+
+      - name: Force install Tailwind CSS Linux (gnu) binary
         run: npm install @tailwindcss/oxide-linux-x64-gnu --save-optional -w frontend
+
       - name: Install Playwright browsers
+        timeout-minutes: 10
         run: npx playwright install --with-deps
         working-directory: e2e-tests
-      - name: Build frontend for tests
+
+      - name: Build frontend for E2E tests
         run: npm run build --workspace=frontend
         env:
           NEXT_PUBLIC_METRICS_SSE_URL: http://127.0.0.1:3001/api/system-metrics
-      - name: Run Playwright tests
+
+      - name: Run Playwright E2E tests
         run: npm run test:e2e
 
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: e2e-tests/playwright-report/
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build Docker Image và Push lên GHCR
+  # ─────────────────────────────────────────────────────────────────────────────
   build-and-push:
-    name: Build & Push Docker Images
+    name: 🐳 Build & Push Docker Images
     needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
       - name: Log in to GitHub Container Registry (GHCR)
         uses: docker/login-action@v3
@@ -48,7 +80,6 @@ jobs:
 
       - name: Build and Push Backend Image
         run: |
-          # Ensure repository owner is lowercase
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_OWNER/device-management-backend:latest"
           docker build -t $IMAGE_NAME -f backend/Dockerfile .
@@ -58,18 +89,23 @@ jobs:
         run: |
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_OWNER/device-management-frontend:latest"
-          # Truyền IP của EC2 vào lúc build để Next.js sử dụng gọi API backend
+          # Truyền IP Public EC2 vào lúc build để Next.js nhúng URL gọi API backend
           docker build \
             --build-arg NEXT_PUBLIC_METRICS_SSE_URL=http://${{ secrets.EC2_HOST }}:3001/api/system-metrics \
             -t $IMAGE_NAME -f frontend/Dockerfile .
           docker push $IMAGE_NAME
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 3: SSH into EC2 and Deploy 
+  # ─────────────────────────────────────────────────────────────────────────────
   deploy:
-    name: Deploy to EC2
+    name: 🚀 Deploy to AWS EC2
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
       - name: Copy docker-compose.prod.yml to EC2
         uses: appleboy/scp-action@v0.1.4
@@ -87,20 +123,19 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
             export EC2_HOST=${{ secrets.EC2_HOST }}
-            
-            # Login to GHCR (Cần PAT token do máy ảo là bên thứ 3)
+
+            # Login to GHCR with PAT Token to pull images
             echo ${{ secrets.GH_PAT_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Stop current containers
-            docker-compose -f docker-compose.prod.yml down || true
-            
-            # Pull new images
-            docker-compose -f docker-compose.prod.yml pull
-            
-            # Start containers
-            docker-compose -f docker-compose.prod.yml up -d
-            
-            # Cleanup old images
+
+            # Stop running containers (ignore errors if no containers are running)
+            docker compose -f docker-compose.prod.yml down || true
+
+            # Pull the latest Docker Images from GHCR
+            docker compose -f docker-compose.prod.yml pull
+
+            # Restart containers with new images
+            docker compose -f docker-compose.prod.yml up -d
+
+            # Clean up old images to save disk space on EC2
             docker image prune -f

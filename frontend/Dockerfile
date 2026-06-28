@@ -10,7 +10,10 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
 
 # Install all dependencies (dev included — needed for next build)
-RUN npm ci --workspace=frontend && mkdir -p /app/frontend/node_modules
+# Then force-install the Alpine (musl) native binary for Tailwind CSS v4 to fix npm optional-deps bug #4828
+RUN npm ci --workspace=frontend && \
+    npm install @tailwindcss/oxide-linux-x64-musl --save-optional --workspace=frontend && \
+    mkdir -p /app/frontend/node_modules
 
 # ─── Stage 2: Build Next.js ────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
