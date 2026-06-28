@@ -1,0 +1,106 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Run E2E Tests
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "npm"
+      - name: Install dependencies
+        run: npm install
+      - name: Force install Tailwind CSS Linux binary
+        run: npm install @tailwindcss/oxide-linux-x64-gnu --save-optional -w frontend
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+        working-directory: e2e-tests
+      - name: Build frontend for tests
+        run: npm run build --workspace=frontend
+        env:
+          NEXT_PUBLIC_METRICS_SSE_URL: http://127.0.0.1:3001/api/system-metrics
+      - name: Run Playwright tests
+        run: npm run test:e2e
+
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Backend Image
+        run: |
+          # Ensure repository owner is lowercase
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="ghcr.io/$REPO_OWNER/device-management-backend:latest"
+          docker build -t $IMAGE_NAME -f backend/Dockerfile .
+          docker push $IMAGE_NAME
+
+      - name: Build and Push Frontend Image
+        run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="ghcr.io/$REPO_OWNER/device-management-frontend:latest"
+          # Truyền IP của EC2 vào lúc build để Next.js sử dụng gọi API backend
+          docker build \
+            --build-arg NEXT_PUBLIC_METRICS_SSE_URL=http://${{ secrets.EC2_HOST }}:3001/api/system-metrics \
+            -t $IMAGE_NAME -f frontend/Dockerfile .
+          docker push $IMAGE_NAME
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy docker-compose.prod.yml to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.prod.yml"
+          target: "~/"
+
+      - name: SSH into EC2 and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            export EC2_HOST=${{ secrets.EC2_HOST }}
+            
+            # Login to GHCR (Cần PAT token do máy ảo là bên thứ 3)
+            echo ${{ secrets.GH_PAT_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Stop current containers
+            docker-compose -f docker-compose.prod.yml down || true
+            
+            # Pull new images
+            docker-compose -f docker-compose.prod.yml pull
+            
+            # Start containers
+            docker-compose -f docker-compose.prod.yml up -d
+            
+            # Cleanup old images
+            docker image prune -f
