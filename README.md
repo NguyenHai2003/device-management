@@ -42,6 +42,7 @@ NEXT_PUBLIC_METRICS_SSE_URL=http://localhost:3001/api/system-metrics
 ```
 
 Truy cập Dashboard tại: http://localhost:3000
+Deploy: http://18.140.234.162:3000/
 
 ## Deploy Local bằng Docker (Môi trường Production)
 
